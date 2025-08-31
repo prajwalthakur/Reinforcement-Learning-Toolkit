@@ -41,6 +41,7 @@ RUN pip3 install torch torchvision --index-url https://download.pytorch.org/whl/
 ENV WORKSPACE_PATH=/root/workspace
 COPY workspace/ $WORKSPACE_PATH/src/
 
+RUN git submodule update --init --recursive
 
 # Set shell to bash
 SHELL ["/bin/bash", "-c"]
