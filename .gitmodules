@@ -1,0 +1,3 @@
+[submodule "workspace/external/mujoco_menagerie"]
+	path = workspace/external/mujoco_menagerie
+	url = https://github.com/google-deepmind/mujoco_menagerie
