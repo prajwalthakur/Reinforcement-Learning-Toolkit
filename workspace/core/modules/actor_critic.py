@@ -2,7 +2,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.distributions import normal
+from torch.distributions import Normal
 
 from core.networks import MLP
 from core.networks import EmpiricalNormalization
@@ -72,8 +72,120 @@ class ActorCritic(nn.Module):
             self.critic_obs_normalizer = torch.nn.Identity()
         print(f"Critic-MLP: {self.critic}")
         
-            
+        
+        # Action noise
+        self.noise_std_type  = noise_std_type
+        if self.noise_std_type == "scalar":
+            self.std = nn.Parameter(init_noise_std*torch.ones(num_actions))
+        elif self.noise_std_type == "log":
+            # can choose unconstrained number log_std
+            # exp(self.log_std) will be always positive
+            self.log_std = nn.Parameter(torch.log(init_noise_std*torch.ones(num_actions)))
+        else:
+            raise ValueError(f"Unkown standard deviation type: {self.noise_std_type}, should be scalr or log")
         
         
-            
+        # Action distribution
+        self.distribution = None
+        Normal.set_default_validate_args(False) # disable args validation for speedup
+        
+    def reset(self,dones=None):
+        pass     
+        
+    def forward(self):
+        raise NotImplementedError
+    
+    @property
+    def action_mean(self):
+        return self.distribution.mean
+    
+    @property
+    def action_std(self):
+        return self.distribution.stddev
+    
+    #TODO:
+    @property
+    def entropy(self):
+        return self.distribution.entropy().sum(dim=-1)
+    
+    def update_distribution(self,obs):
+        #compute mean
+        mean = self.actor(obs)
+        if self.noise_std_type == "scalar":
+            std = self.std.expand_as(mean)
+        elif self.noise_std_type == "log":
+            std = torch.exp(self.log_std).expand_as(mean)
+        else:
+            raise ValueError(f"Unkown standard deviation type:{self.noise_Std_type}, should be scalar or log")
+        # create distrbution
+        self.distribution = Normal(mean,std)
+        
+    # during training
+    def act(self,obs,**kwargs):
+        obs = self.get_actor_obs(obs)
+        obs = self.actor_obs_normalization(obs)
+        self.update_distribution(obs)
+        return self.distribution.sample(obs)
+    
+    
+    # during evaluation or infrence
+    def act_infrence(self,obs,**kwargs):
+        obs = self.get_actor_obs(obs)
+        obs = self.actor_obs_normalization(obs)
+        return self.actor(obs)
+     
+     
+    # call critic 
+    def evaluate(self,obs,**kwargs):
+        obs = self.get_critic_obs(obs)
+        obs  = self.critic_obs_normalization(obs)
+        return self.critic(obs)
+    
+    
+    # filter out the actor observation
+    
+    def get_actor_obs(self,obs,**kwargs):
+        obs_list = []
+        for obs_group in self._obs_groups["policy"]:
+            obs_list.append(obs[obs_group])
+        return torch.cat(obs_list, dim=-1) # batch_size * num_action_obs
+    
+    
+    # filter out the critic observation
+    def get_critic_obs(self,obs,**kwargs):
+        obs_list = []
+        for obs_group in self._obs_groups["critic"]:
+            obs_list.append(obs[obs_group])
+        return torch.cat(obs_list, dim=-1) # batch_size * num_action_obs
+    
+    #TODO:
+    def get_action_log_prob(self, actions):
+        return self.distribution()
+    
+    
+    def update_normalization(self,obs):
+        if self.actor_obs_normalization:
+            actor_obs = self.get_actor_obs(obs)
+            self.actor_obs_normalizer.update(actor_obs)
+        if self.critic_obs_normalization:
+            critic_obs = self.get_critic_obs(obs)
+            self.critic_obs_normalizer.update(critic_obs)
+    
+    
+    def load_state_dict(self, state_dict, strict=True):
+        """Load the parameters of the actor-critic model.
+
+        Args:
+            state_dict (dict): State dictionary of the model.
+            strict (bool): Whether to strictly enforce that the keys in state_dict match the keys returned by this
+                           module's state_dict() function.
+
+        Returns:
+            bool: Whether this training resumes a previous training. This flag is used by the `load()` function of
+                  `OnPolicyRunner` to determine how to load further parameters (relevant for, e.g., distillation).
+        """
+
+        super().load_state_dict(state_dict, strict=strict)
+        return True  # training resumes
+           
         

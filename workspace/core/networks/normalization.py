@@ -14,7 +14,7 @@ class EmpiricalNormalization(nn.Module):
                 shape (int or tuple of int ): shape of the input values except the batch size
                 eps (float): Small Value for stability
                 until (int or None): if this arg specified, the module learns input values until 
-                the sum of batch sizes exceeds it
+                the sum of batch sizes do not exceeds it
             Note: normalization parameters are computed over whole batch, not for each environment seperately.
         """
         super().__init__()
@@ -40,9 +40,27 @@ class EmpiricalNormalization(nn.Module):
         return norm_val
 
     @torch.jit.unused
-    def update(Self,x):
+    def update(self,x):
         "Learn input values without computing the output values of them"
-        # updated-mean = old_mean + (new_data- old_mean)/(old_count + count(new_data))
+        # updated-mean = old_mean + (N-k)/k *(new_data- old_mean)
+        # only update the mean/var in training mode, in eval or infrence dont update
+        # after enough samples, 
+        # the normalization stats are considered reliable and should be frozen.
+        if not self.training:
+            return
+        if self.until is not None and self.count >= self.until:
+            return 
+        count_x = x.shape[0]
+        self.count += count_x
+        rate = count_x/self.count
+        var_x = torch.var(x,dim=0,unbiased=False,keepdim=True)
+        mean_x = torch.mean(x,dim=0,keepdim=True)
+        delta_mean = mean_x - self._mean
+        self._mean += rate*delta_mean
+        self._var += rate*(var_x - self._var + delta_mean*(mean_x - self._mean))
+        self._std = torch.sqrt(self._var)
+        
+        
     
     @torch.jit.unused
     def inverse(self,y):
